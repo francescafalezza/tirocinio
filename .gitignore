@@ -1,9 +1,35 @@
-data/raw
-data/processed
-*.wav
-
+# Python
 __pycache__/
-*.pyc
-.env
+*.py[cod]
+*.pyo
+.eggs/
+*.egg-info/
+dist/
+build/
 
+# Ambiente virtuale
+venv/
+.env/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Audio (file pesanti, non vanno su git)
+data/recording/*.wav
+data/recording/*.mp3
+data/rir/*.wav
+
+# Risultati generati automaticamente
+data/results/
+
+# IDE
 .vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Variabili d'ambiente
+.env
