@@ -1,0 +1,5 @@
+
+audio: 
+  target_sr: 44100
+  frame_length: 2048
+  hop_length: 512

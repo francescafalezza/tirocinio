@@ -14,7 +14,7 @@ def octave_band_edges (center_freq):
     high: frequenza di taglio inferiore
     """
     low = center_freq/np.sqrt(2)
-    high = center_freq*np.sqrt(s)
+    high = center_freq*np.sqrt(2)
     return low, high
 
 def octave_filter(center_freq, sr, order=4):
@@ -61,7 +61,7 @@ def filter_all_bands(y, sr, center_freq=None, order=4):
         try:
             y_filtered = applay_filter(y, freq, sr, order)
             bands[freq] = y_filtered
-            prinf(f"Banda {freq} Hz filtrata")
+            print(f"Banda {freq} Hz filtrata")
         except ValueError as e:
             print(f"Errore per la frequenza {freq}: {e}")
 

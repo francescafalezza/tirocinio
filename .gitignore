@@ -16,8 +16,12 @@ env/
 .ipynb_checkpoints/
 
 # Audio (file pesanti, non vanno su git)
+data/
 data/recording/*.wav
 data/recording/*.mp3
+data/recording/*.aup3-shm
+data/recording/*.aup3-wal
+data/recording/*.aup3
 data/rir/*.wav
 
 # Risultati generati automaticamente
