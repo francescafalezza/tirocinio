@@ -2,6 +2,7 @@ import scipy.signal
 import numpy as np
 from blind_rt60 import BlindRT60
 from collections import deque
+import librosa
 
 
 class UpdateMethod:
@@ -16,24 +17,26 @@ def downsampling (signal,sr, R):
     sr_downsampled=sr//R
     return signal_downsampled, sr_downsampled
 
-
+"""
 def extract_decay_candidates(signal, sr, pauses, hop_length=512, 
-                              decay_window_s=0.15):
-    """
+                              decay_window_s=0.3):
+    
     Per ogni pausa rilevata, estrae la finestra di segnale 
     immediatamente precedente come candidato al sound decay.
     
     Il decay avviene negli ultimi ~200-300ms prima del silenzio.
-    """
+    
     decay_window_samples = int(decay_window_s * sr)
     candidates = []
     
+    
+
     for pause in pauses:
         # Il decay finisce dove inizia la pausa
-        decay_end = int(pause["start_time"] * sr)
-        decay_start = max(0, decay_end - decay_window_samples)
+        decay_end = int(pause["end_time"] * sr)
+        decay_start = int(pause["start_time"] * sr)
         
-        segment = signal[decay_start:decay_end]
+        segment = signal[decay_start:min(decay_end, decay_start+decay_window_samples)]
         
         # Verifica minima: il segmento deve avere abbastanza campioni
         if len(segment) > int(0.05 * sr):  # almeno 50ms
@@ -41,12 +44,13 @@ def extract_decay_candidates(signal, sr, pauses, hop_length=512,
                 "signal": segment,
                 "start_sample": decay_start,
                 "end_sample": decay_end,
-                "pause_ref": pause
+                "pause_ref": pause,
+                "envelope_db":pause["envelope_db"]
             })
     
     return candidates
-
-def ML_estimate_one_candidate(segment: np.ndarray, sr_downsampled: int) -> float |None:
+"""
+def ML_estimate_one_candidate(segment: np.ndarray, sr_downsampled: int, estimator: BlindRT60) -> float |None:
     """Stima il RT60 per un singolo segmento di decay tramite ML
      Parametri:
         segment: array 1D del segnale audio del decay del pause detector
@@ -63,15 +67,7 @@ def ML_estimate_one_candidate(segment: np.ndarray, sr_downsampled: int) -> float
     N =len(segment)
     x_frame_2d= segment.reshape(1,N)
     
-    #inizializzaione di BlindRT60
-    estimator= BlindRT60(
-        fs=sr_downsampled,
-        framelen=N/sr_downsampled,
-        max_itr=1000,
-        max_err=1e-1,
-        bisected_itr=8,  #prime 8 iterazioni con bisezione
-        a_init =0.99,     #poi Newton
-    )
+   
 
     estimator.init_states(batch=1)
 
@@ -98,17 +94,19 @@ def ML_estimate_one_candidate(segment: np.ndarray, sr_downsampled: int) -> float
         
     #leggo self.a e lo converto in RT60. Tau costante di tempo di decadimento
     a= estimator.a.item()
+    
+    if a<=0 or a>=1:
+        return None
     tau = -1.0/(np.log(a)*sr_downsampled)
 
     rt60= 6.908*tau
 
-    #controllo range fisico
-    if not (0.5<=rt60<=4.0):
-        return None
 
     return rt60
 
-def estimate_all_candidates(decay_candidates: list, sr_downsampled:int) ->list:
+
+
+def estimate_all_candidates(decay_candidates, sr_downsampled:int):
 
     """Applica estimate_one_candidate a tutti i candidati
     Paramentri
@@ -118,11 +116,22 @@ def estimate_all_candidates(decay_candidates: list, sr_downsampled:int) ->list:
     Ritorna
     lista di float"""
     rt60_estimates= []
-    
+     #inizializzaione di BlindRT60
+    estimator= BlindRT60(
+        fs=sr_downsampled,
+        framelen=1024/sr_downsampled,
+        max_itr=500,
+        max_err=1e-1,
+        bisected_itr=8,  #prime 8 iterazioni con bisezione
+        a_init =0.99,     #poi Newton
+    )
     for i, candidate in enumerate(decay_candidates):
-        segment = candidate["signal"]
-        rt60=ML_estimate_one_candidate(segment, sr_downsampled)
-        rt60_estimates.append(rt60)
+        segment = candidate
+        rt60=ML_estimate_one_candidate(segment, sr_downsampled, estimator)
+        if rt60 is not None:
+            if rt60>0 and rt60<3.0:
+                rt60_estimates.append(rt60)
+        
     return rt60_estimates
 
 
@@ -181,7 +190,7 @@ def compute_final_rt60(
     kf: int = 400,
     ks: int = 20,
     eps_t: float = 0.2,
-    q_threshold: int = 30,
+    q_threshold: int = 100,
     bin_edges: np.ndarray = None,
 ) -> float | None:
     """
@@ -214,7 +223,7 @@ def compute_final_rt60(
     # Stato dello smoothing
     current_rt60 = None
     consecutive_diff = 0        # contatore frame con differenza > eps_t
-
+    history=[]
     for rt60 in valid_estimates:
 
         peak_slow, peak_fast, enough_data = update_histograms(
@@ -225,6 +234,7 @@ def compute_final_rt60(
         # usa la stima grezza e continua
         if not enough_data:
             current_rt60 = rt60
+            history.append(current_rt60)
             continue
 
         # --- Logica di switch tra istogramma lento e veloce ---
@@ -238,7 +248,7 @@ def compute_final_rt60(
         if consecutive_diff >= q_threshold:
             # Il RT sta cambiando — switch all'istogramma veloce
             peak_to_use = peak_fast
-            beta = 0.2                      # smoothing basso, insegue velocemente il nuovo valore
+            beta = 0.99                     # smoothing basso, insegue velocemente il nuovo valore
 
             # Resetta il buffer lento con i valori del veloce
             
@@ -249,7 +259,7 @@ def compute_final_rt60(
         else:
             # Condizioni stabili — usa l'istogramma lento
             peak_to_use = peak_slow
-            beta = 0.995                    # smoothing forte, bassa varianza
+            beta = 1-(1/min(kf, len(valid_estimates)))                 # smoothing forte, bassa varianza
 
         # --- Smoothing ricorsivo Eq. 15 di Löllmann ---
         # T60(t) = beta * T60(t-1) + (1-beta) * T60_picco(t)
@@ -258,4 +268,81 @@ def compute_final_rt60(
         else:
             current_rt60 = beta * current_rt60 + (1 - beta) * peak_to_use
 
-    return current_rt60
+        history.append(current_rt60)
+        
+    return history 
+
+
+def pre_selection(signal_downsampled):
+
+    """ 
+    Step 1: framing : segnale diviso in frame (M=128), segnale processato per frame di lunghezza M spostati di M_a
+    Step 2: framing, ogni frame è diviso in L=7 subframe, ogni subframe è lungo P= 18 campioni 
+    Per ciascun sotto-frame si calcola:
+        -energia 
+        -valore massimo 
+        -valore minimo
+        
+    CONFRONTO CON SUB FRAME SUCC: un possibile decadimento è dichiarato quando per l=0, ..L-2 sono soddisfratte tre condizioni 
+    1. energia del sotto frame attuale è maggiore del successivo
+    2. valore del max deve diminuire (garantisce che le creste più evidenti smorzino con il tempo)
+    3. valore del minimo deve calare (il valore minimo deve aumentare verso zero, cioè il valore più negativo
+    del frame corrente deve essere "meno negativo" del successivo)
+    
+    Solo se le tre condizioni sono soddifatte per una sequenza consecutiva di sottoframe lmin=3
+    
+    Se una delle condizioni è violata, si contralla se l ha raggiunto un valore minimo, altrimenti si scarta quel frame e si passa al successivo 
+    
+    il vettore di pesi è scelto fra 0.8-1 
+    """
+    #framing e subframing
+    M =1024
+    L =28
+    M_a=25 
+    P=18
+    w_var=0.8
+    w_max=0.8
+    w_min=0.8
+    count=0
+    l_min=3
+    
+    sub_frames=[]
+    decay_candidate=[]
+    
+    for i in range(0,len(signal_downsampled)-M, M_a):
+        current_frame=signal_downsampled[i:i+M] #prende il frame intero
+        count=0
+        
+        for l in range(L-1):    
+        #verifico tre condizioni per ogni subframe
+            y_curr = current_frame[l*P : (l+1)*P]
+            y_next = current_frame[(l+1)*P : (l+2)*P]
+            energy_possible_candidate=np.sum(np.square(y_curr)) 
+            max_energy_value=np.max(np.abs(y_curr))
+            min_energy_value=np.min(np.abs(y_curr))
+        
+            energy_next_subframe=np.sum(np.square(y_next))
+            max_energy_next_subframe=np.max(np.abs(y_next))
+            min_energy_next_subframe=np.min(np.abs(y_next)) 
+    
+            cond_1=energy_possible_candidate> (w_var*energy_next_subframe)
+            cond_2=max_energy_value > (w_max*max_energy_next_subframe)
+            cond_3=min_energy_value < (w_min*min_energy_next_subframe)
+        
+        
+            if cond_1 and cond_2 and cond_3:
+                count=count+1
+            
+            else:
+                if count>=l_min:
+                    break
+                
+                count=0
+                
+        if(count>=l_min):
+            decay_candidate.append(current_frame)
+        
+    type(decay_candidate)
+    print(f"Candidati di decay pre-selezionati: {len(decay_candidate)}")
+        
+    return decay_candidate

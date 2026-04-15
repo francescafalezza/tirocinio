@@ -43,7 +43,7 @@ def estimate_noise_floor(envelope, percentile=10):
     print(f"  ✓ Noise floor stimato: {noise_floor_db:.1f} dB")
     return noise_floor_db
 
-def detect_pauses(envelope, sr, hop_length=512, min_pause_duration=0.1, noise_floor_margin_db=10, slope_threshold_db=-0.5):
+def detect_pauses(envelope, sr, hop_length=512, min_pause_duration=0.1, noise_floor_margin_db=10, slope_threshold_db=-0.05):
     """Analizza la differenza di energia tra un frame e l'altro.
     Uso due margini: soglia inferiore data dal soglia di rumore e una soglia superiore per eliminare i picchi di energia
     Le pause utili saranno quelle dove la pendenza è negativa e costante per un certo tempo"""
@@ -83,11 +83,13 @@ def detect_pauses(envelope, sr, hop_length=512, min_pause_duration=0.1, noise_fl
             end = i
             pause_duration = (end - start) * hop_length / sr
             if pause_duration >= min_pause_duration: #tengo pause abbastanza lunghe
+                segmento_db = env[start:end]
                 pauses.append({
                     "start_time": librosa.frames_to_time(start, sr=sr, hop_length=hop_length),
                     "end_time": librosa.frames_to_time(end, sr=sr, hop_length=hop_length),
                     "start_frame": start,
-                    "end_frame": end
+                    "end_frame": end,
+                    "envelope_db":segmento_db
                 })
 
     
@@ -96,11 +98,12 @@ def detect_pauses(envelope, sr, hop_length=512, min_pause_duration=0.1, noise_fl
         end = len(env)-1
         pause_duration= (end-start)*hop_length/sr
         if pause_duration>min_pause_duration:
+            segmento_db = env[start:end]
             pauses.append({
                 "start_time": librosa.frames_to_time(start, sr=sr, hop_length=hop_length),
                 "end_time": librosa.frames_to_time(end, sr=sr, hop_length=hop_length),
                 "start_frame": start,
-                "end_frame": end
+                "end_frame": end,
+                "envelope_db":segmento_db
             })
     return pauses
-
