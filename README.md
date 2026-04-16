@@ -1,8 +1,8 @@
-Analisi comparativa di due algoritmi diversi per la stima cieca del tempo di riverbero
+  Validazione di un algortimo di stima blind del tempo di rivebero tramite analisi comparativa con ground truth certificata. 
 
 Per il corretto funzionamento del software è necessario possedere una registrazione qualsiasi di una sala e la RIR corrispondente. 
 
-Il primo algoritmo implementato si basa sull'articolo "An improved algorithm for blind reverberation time estimation" di Lollmann et all.
+L'implementato si basa sull'articolo "An improved algorithm for blind reverberation time estimation" di Lollmann et all.
 
 L'algoritmo di Lollmann parte da una ipotesi statistica: il suono che decade si comporta come un processo casuale dove l'energia diminuisce in modo esponenziale nel tempo. Il segnale viene visto come una sequenza di variabili casuali con distribuzione normale, la larghezza della distribuzione di resistrenge con il tempo, seguendo il tasso di decadimento. 
 
