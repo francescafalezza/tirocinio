@@ -1,4 +1,4 @@
-Analisi comparativa di due algoritmi diversi per la stima cieca del tempo di riverbero
+Analisi comparativa di due algoritmi diversi per la stima cieca del tempo di riverbero.
 
 Per il corretto funzionamento del software è necessario possedere una registrazione qualsiasi di una sala e la RIR corrispondente. 
 
