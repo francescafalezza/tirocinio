@@ -2,7 +2,7 @@ import scipy.signal
 import numpy as np
 from blind_rt60 import BlindRT60
 from collections import deque
-import librosa
+
 
 
 class UpdateMethod:
@@ -17,39 +17,7 @@ def downsampling (signal,sr, R):
     sr_downsampled=sr//R
     return signal_downsampled, sr_downsampled
 
-"""
-def extract_decay_candidates(signal, sr, pauses, hop_length=512, 
-                              decay_window_s=0.3):
-    
-    Per ogni pausa rilevata, estrae la finestra di segnale 
-    immediatamente precedente come candidato al sound decay.
-    
-    Il decay avviene negli ultimi ~200-300ms prima del silenzio.
-    
-    decay_window_samples = int(decay_window_s * sr)
-    candidates = []
-    
-    
 
-    for pause in pauses:
-        # Il decay finisce dove inizia la pausa
-        decay_end = int(pause["end_time"] * sr)
-        decay_start = int(pause["start_time"] * sr)
-        
-        segment = signal[decay_start:min(decay_end, decay_start+decay_window_samples)]
-        
-        # Verifica minima: il segmento deve avere abbastanza campioni
-        if len(segment) > int(0.05 * sr):  # almeno 50ms
-            candidates.append({
-                "signal": segment,
-                "start_sample": decay_start,
-                "end_sample": decay_end,
-                "pause_ref": pause,
-                "envelope_db":pause["envelope_db"]
-            })
-    
-    return candidates
-"""
 def ML_estimate_one_candidate(segment: np.ndarray, sr_downsampled: int, estimator: BlindRT60) -> float |None:
     """Stima il RT60 per un singolo segmento di decay tramite ML
      Parametri:
@@ -60,17 +28,15 @@ def ML_estimate_one_candidate(segment: np.ndarray, sr_downsampled: int, estimato
         rt60: stima in secondi oppure None è fuori dai range
     """
     
-
+   
     #step() vuole x_frames di shape (batch, framelen)=(1,N)
     #uso lunghezza del segmento come framelen, così self.n in likelohood_derivate ha la dimensione giusta
 
     N =len(segment)
-    x_frame_2d= segment.reshape(1,N)
-    
-   
-
     estimator.init_states(batch=1)
-
+    
+    x_frame_2d= segment.reshape(1,N)
+     
     #lopp di convergenza: si ferma quando dl_da <max_err
     converged = False
 
@@ -101,6 +67,8 @@ def ML_estimate_one_candidate(segment: np.ndarray, sr_downsampled: int, estimato
 
     rt60= 6.908*tau
 
+    if rt60 < 0.1 or rt60 > 5.0:
+        return None
 
     return rt60
 
@@ -116,17 +84,27 @@ def estimate_all_candidates(decay_candidates, sr_downsampled:int):
     Ritorna
     lista di float"""
     rt60_estimates= []
+    
+    if not decay_candidates:
+        print("NESSUN CANDIDATO")
+        return [],[] 
+    
      #inizializzaione di BlindRT60
+    expeceted_len=len(decay_candidates[0])
     estimator= BlindRT60(
         fs=sr_downsampled,
-        framelen=1024/sr_downsampled,
+        framelen=expeceted_len/sr_downsampled,  
         max_itr=500,
         max_err=1e-1,
         bisected_itr=8,  #prime 8 iterazioni con bisezione
         a_init =0.99,     #poi Newton
     )
+   
+    
     for i, candidate in enumerate(decay_candidates):
         segment = candidate
+        if len(segment)!= expeceted_len:
+            continue
         rt60=ML_estimate_one_candidate(segment, sr_downsampled, estimator)
         if rt60 is not None:
             if rt60>0 and rt60<3.0:
@@ -211,7 +189,7 @@ def compute_final_rt60(
     # Con meno di ks stime non ha senso usare il doppio istogramma —
     # ritorna direttamente la mediana come stima robusta
     if len(valid_estimates) < ks:
-        return float(np.median(valid_estimates))
+        return [float(np.median(valid_estimates))]
 
     if bin_edges is None:
         bin_edges = np.arange(0.1, 4.05, 0.05)
@@ -273,7 +251,7 @@ def compute_final_rt60(
     return history 
 
 
-def pre_selection(signal_downsampled):
+def pre_selection(signal_downsampled, center_freq_hz, pauses_starts_samples=None, sr=None, tolerance=None ):
 
     """ 
     Step 1: framing : segnale diviso in frame (M=128), segnale processato per frame di lunghezza M spostati di M_a
@@ -296,22 +274,59 @@ def pre_selection(signal_downsampled):
     il vettore di pesi è scelto fra 0.8-1 
     """
     #framing e subframing
-    M =1024
-    L =28
-    M_a=25 
-    P=18
-    w_var=0.8
-    w_max=0.8
-    w_min=0.8
+    M = 1024  
+    L =28 
+    M_a=25
+    P= 36
+    
+    if center_freq_hz <= 250:
+        w_var = 0.70   # era 0.6 — richiede decadimento energetico più netto
+        w_max = 0.80   # era 0.8
+        w_min = 0.80   # era 0.8
+        l_min = 3      
+    elif center_freq_hz <= 500:
+        w_var = 0.70
+        w_max = 0.83
+        w_min = 0.83
+        l_min = 3
+    else:
+        w_var = 0.6    # valori originali per alte frequenze
+        w_max = 0.8
+        w_min = 0.8
+        l_min = 3
+    
+    
     count=0
-    l_min=3
+    
     
     sub_frames=[]
     decay_candidate=[]
+    valid_starts=None
+    # genera i punti di partenza: dalle pause se disponibili,
+    # altrimenti scansione completa come prima
     
-    for i in range(0,len(signal_downsampled)-M, M_a):
-        current_frame=signal_downsampled[i:i+M] #prende il frame intero
-        count=0
+    
+
+    #DEBUG
+    print(f"Lunghezza segnale: {len(signal_downsampled)}")
+    print(f"Range scansione: 0 a {len(signal_downsampled) - M} step {M_a}")
+    print(f"Pause starts samples: {pauses_starts_samples[:5] if pauses_starts_samples is not None else None}")
+   
+    print(f"Primo i nel loop: 0")
+    print(f"Distanza primo i dalla prima pausa: {np.abs(pauses_starts_samples - 0).min() if pauses_starts_samples is not None else None}")
+    
+    
+    for i in range(0, len(signal_downsampled) - M, M_a):
+        
+        # filtra per prossimità alle pause
+        if pauses_starts_samples is not None and tolerance is not None:
+            distances = np.abs(pauses_starts_samples - i)
+            if np.min(distances) > tolerance:
+                continue
+
+        current_frame = signal_downsampled[i:i+M]
+        count = 0        
+        last_valid_l = -1  # traccia l'ultimo subframe valido
         
         for l in range(L-1):    
         #verifico tre condizioni per ogni subframe
@@ -331,6 +346,7 @@ def pre_selection(signal_downsampled):
         
         
             if cond_1 and cond_2 and cond_3:
+                last_valid_l=l
                 count=count+1
             
             else:
@@ -338,8 +354,10 @@ def pre_selection(signal_downsampled):
                     break
                 
                 count=0
+                last_valid_l=-1
                 
         if(count>=l_min):
+            
             decay_candidate.append(current_frame)
         
     type(decay_candidate)
