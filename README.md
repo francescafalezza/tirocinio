@@ -19,3 +19,6 @@ Differenze di implementazione:
 2. Nell'articolo viene usato un fattore di framing M=128. Nell'algoritmo presentato con un fattore così piccolo non sono visibili risultati. Bisogna usare M>512  questo perchè il modello ML richiede un numero sufficiente di campioni del suono per stimare il tasso di decadimento e migliorare la stima del rt60 poichè una finestra più ampia riduce l'influenza del rumore. Per RT bassi (come quelo presentato nell'articolo) è sufficiente un M=128.
 
 I risultati dell'algoritmo "lollman" presentano un errore medio del 15%.
+
+
+![Diagramma di flusso](docs/flowchart.png)
