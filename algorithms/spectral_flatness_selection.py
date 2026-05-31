@@ -126,8 +126,9 @@ def estimate_all_candidates_SF(candidates, weights, sr_downsampled):
         rt60 = lollmann.ML_estimate_one_candidate(segment, sr_downsampled, estimator)
         
         if rt60 is not None:
-            rt60_estimates.append(rt60)
-            rt60_weights.append(weight)
+            if rt60>0.0 and rt60<3.0:
+                rt60_estimates.append(rt60)
+                rt60_weights.append(weight)
     
     return rt60_estimates, rt60_weights
     

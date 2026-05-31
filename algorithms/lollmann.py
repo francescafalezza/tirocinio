@@ -226,7 +226,7 @@ def compute_final_rt60(
         if consecutive_diff >= q_threshold:
             # Il RT sta cambiando — switch all'istogramma veloce
             peak_to_use = peak_fast
-            beta = 0.99                     # smoothing basso, insegue velocemente il nuovo valore
+            beta = 0.2                     # smoothing basso, insegue velocemente il nuovo valore. era 0.99!
 
             # Resetta il buffer lento con i valori del veloce
             
@@ -237,7 +237,7 @@ def compute_final_rt60(
         else:
             # Condizioni stabili — usa l'istogramma lento
             peak_to_use = peak_slow
-            beta = 1-(1/min(kf, len(valid_estimates)))                 # smoothing forte, bassa varianza
+            beta = 0.995                 # smoothing forte, bassa varianza
 
         # --- Smoothing ricorsivo Eq. 15 di Löllmann ---
         # T60(t) = beta * T60(t-1) + (1-beta) * T60_picco(t)

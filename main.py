@@ -25,9 +25,16 @@ def main():
     recording, sr_recording = loader.load_audio(path_recording)
     
     #RT di riferimento
-    rt_reference = reference.extract_ground_truth_rt60(rir, sr_rir)
+    """rt_reference, rt_reference_iso = reference.extract_ground_truth_rt60(rir, sr_rir)
    
-    print(f"RT60 riferimento  {rt_reference:.2f} s")
+    #print(f"RT60 riferimento  {rt_reference:.2f} s")
+    print(f"RT60 riferimento (ISO)  {rt_reference_iso:.2f} s")
+    print(f"Durata RIR: {len(rir)/sr_rir:.3f} s")
+    print(f"Sample rate: {sr_rir} Hz")
+    print(f"Valore massimo: {np.max(np.abs(rir)):.4f}")
+    print(f"Valore minimo assoluto non zero: {np.min(np.abs(rir[rir!=0])):.6f}") """
+    
+    rt_reference= 1.275
     
     #Step 2: filtraggio per bande
     bands = band_filter.filter_all_bands(recording, sr_recording)
